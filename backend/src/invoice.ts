@@ -3,7 +3,7 @@ import { extractInvoice, formatConfirmation } from "./extraction.ts";
 import { computeInvoice } from "./money.ts";
 import { toDocumentCreate } from "./mapping.ts";
 import { createDocument, sendDocument, getUbl } from "./einvoice.ts";
-import { createPaymentLink } from "./stripe.ts";
+import { assertStripeConfigured, createPaymentLink } from "./stripe.ts";
 import { SELLER } from "./seller.ts";
 import type { ExtractedFacts, RawInvoice, ComputedInvoice } from "./types.ts";
 
@@ -37,6 +37,7 @@ export async function extractFromMessage(message: string): Promise<ExtractResult
 }
 
 export interface SendOptions {
+  /** Skip Stripe entirely (--no-stripe). PEPPOL still sends. */
   skipStripe?: boolean;
 }
 
@@ -49,7 +50,29 @@ export interface SendResult {
   computed: ComputedInvoice;
 }
 
+/** PEPPOL send succeeded but the payment link could not be created. */
+export class InvoiceSentStripeFailedError extends Error {
+  readonly sent: SendResult;
+
+  constructor(sent: SendResult, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`Invoice sent over Peppol but Stripe payment link failed: ${detail}`);
+    this.name = "InvoiceSentStripeFailedError";
+    this.sent = sent;
+  }
+}
+
+/**
+ * Create PEPPOL invoice + optional Stripe payment link.
+ *
+ * Stripe policy (Tristan):
+ * - Validate key BEFORE irreversible Peppol send (unless skipStripe).
+ * - If Stripe fails after send, throw InvoiceSentStripeFailedError — never
+ *   return success with a missing payment link.
+ */
 export async function sendInvoice(raw: RawInvoice, options?: SendOptions): Promise<SendResult> {
+  if (!options?.skipStripe) assertStripeConfigured();
+
   const computed = computeInvoice(raw);
   const body = toDocumentCreate(computed);
 
@@ -69,24 +92,20 @@ export async function sendInvoice(raw: RawInvoice, options?: SendOptions): Promi
   const ubl_path = `out/${computed.meta.invoice_number}.xml`;
   writeFileSync(ubl_path, ubl);
 
-  if (options?.skipStripe) {
-    return {
-      document_id: created.id,
-      document_state: created.state,
-      invoice_number: computed.meta.invoice_number,
-      ubl_path,
-      computed,
-    };
-  }
-
-  const pay = await createPaymentLink(computed);
-
-  return {
+  const sent: SendResult = {
     document_id: created.id,
     document_state: created.state,
     invoice_number: computed.meta.invoice_number,
     ubl_path,
-    payment_link_url: pay.url,
     computed,
   };
+
+  if (options?.skipStripe) return sent;
+
+  try {
+    const pay = await createPaymentLink(computed);
+    return { ...sent, payment_link_url: pay.url };
+  } catch (e) {
+    throw new InvoiceSentStripeFailedError(sent, e);
+  }
 }

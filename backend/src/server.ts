@@ -8,8 +8,11 @@
  *   npm run dev
  */
 import { createServer, type IncomingMessage } from "node:http";
-import { extractFromMessage, sendInvoice } from "./invoice.ts";
-import { assertStripeConfigured } from "./stripe.ts";
+import {
+  extractFromMessage,
+  sendInvoice,
+  InvoiceSentStripeFailedError,
+} from "./invoice.ts";
 import type { RawInvoice } from "./types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -72,9 +75,20 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: "raw invoice with buyer and line_items is required" });
         return;
       }
-      assertStripeConfigured();
-      const result = await sendInvoice(raw);
-      json(res, 200, { status: "sent", ...result });
+      try {
+        const result = await sendInvoice(raw);
+        json(res, 200, { status: "sent", ...result });
+      } catch (e) {
+        if (e instanceof InvoiceSentStripeFailedError) {
+          json(res, 502, {
+            status: "invoice_sent_stripe_failed",
+            error: e.message,
+            ...e.sent,
+          });
+        } else {
+          throw e;
+        }
+      }
       return;
     }
 

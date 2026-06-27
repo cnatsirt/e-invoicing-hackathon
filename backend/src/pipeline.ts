@@ -5,11 +5,12 @@
  *   npm run pipeline -- "Invoice Acme for 3 days at €600/day, 21% VAT, BE0987654321"
  *   npm run pipeline -- --dry "<message>"     # stop before any network call
  *   npm run pipeline -- --no-stripe "<message>"
- *
- * Closes the "glue: accept RawInvoice" TODO — this is what the frontend calls.
  */
-import { extractFromMessage, sendInvoice } from "./invoice.ts";
-import { assertStripeConfigured } from "./stripe.ts";
+import {
+  extractFromMessage,
+  sendInvoice,
+  InvoiceSentStripeFailedError,
+} from "./invoice.ts";
 
 const DRY = process.argv.includes("--dry");
 const NO_STRIPE = process.argv.includes("--no-stripe");
@@ -27,10 +28,6 @@ async function main() {
   if (!message) {
     throw new Error('Provide an invoice message, e.g. npm run pipeline -- "Invoice Acme …"');
   }
-
-  // Fail fast on Stripe config BEFORE the irreversible Peppol send, so we never
-  // send an invoice we can't bill. Use --no-stripe to skip on purpose.
-  if (!NO_STRIPE) assertStripeConfigured();
 
   console.log(`\n→ extracting via Groq: "${message.slice(0, 72)}${message.length > 72 ? "…" : ""}"`);
   const extracted = await extractFromMessage(message);
@@ -66,9 +63,9 @@ async function main() {
     console.log(`  payment link: ${sent.payment_link_url}`);
     console.log("\n✅ Full pipeline OK: text → Groq → money engine → PEPPOL UBL sent + Stripe payment link.");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("Stripe")) {
-      console.error(`\n⚠️  INVOICE SENT but Stripe payment link FAILED: ${msg}`);
+    if (e instanceof InvoiceSentStripeFailedError) {
+      console.error(`\n⚠️  INVOICE SENT but Stripe payment link FAILED: ${e.message}`);
+      console.error(`   document id=${e.sent.document_id}  UBL → backend/${e.sent.ubl_path}`);
       console.error("   The invoice is already out over Peppol — generate the link manually.");
       process.exitCode = 1;
       return;
