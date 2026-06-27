@@ -20,13 +20,17 @@ const groq = new Groq(); // reads GROQ_API_KEY from env
 // Seller profile — update with real details before demo
 // ---------------------------------------------------------------------------
 const SELLER_PROFILE = {
-  name: "Your Company Name",
-  vat_number: "BE1018265814",  // replace with your real VAT
-  address: "Rue Picard 11, 1000 Brussels, Belgium",
+  // Sandbox tenant identity — matches the e-invoice.be account (GET /api/me)
+  name: "Test Company BV",
+  vat_number: "BE0999465828",
+  company_id: "0999465828",    // CBE/enterprise number — drives sender Peppol ID
+  address: "Teststraat 1, 1000 Brussel, Belgium",
   country_code: "BE",
-  email: "you@yourcompany.be",
-  iban: "BE68539007547034",    // replace with your real IBAN
-  bank_name: "Your Bank",
+  email: "tristan@cott.am",
+  iban: "BE68539007547034",
+  bank_name: "BNP Paribas Fortis",
+  peppol_scheme: "0208",       // BE CBE scheme
+  peppol_id: "0999465828",
 };
 
 // ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ A WhatsApp-style chat interface where a business owner sends something like:
 4. Creates a Stripe payment link and sends it to the client
 5. Logs the double-entry journal entries automatically (Dr AR / Cr Revenue / Cr VAT Payable)
 
-> **We do NOT hand-roll UBL XML.** e-invoice.be (Track 1 sponsor; their CTO is a judge) is a JSON-in → valid-UBL-out certified Peppol access point with a free sandbox. We POST flat JSON, they generate EN16931/schematron-valid UBL and route it. Building on the sponsor's rails = faster, more reliable, and the strongest possible compliance story. The cash flags ("compliant invoices created earn immediate payment") almost certainly fire through their pipeline.
+> **We do NOT hand-roll UBL XML.** e-invoice.be (Track 1 sponsor; their CTO is a judge) is a JSON-in → valid-UBL-out certified Peppol access point with a free sandbox. We POST flat JSON, they generate EN16931/schematron-valid UBL and route it. Building on the sponsor's rails = faster, more reliable, and the strongest possible compliance story.
 
 **Live demo moment:** submit a real invoice during the hackathon → collect the cash flag on the spot.
 
@@ -31,7 +31,7 @@ A WhatsApp-style chat interface where a business owner sends something like:
 ```
 User input (chat text / voice transcript)          PDF / photo of a document
         ↓                                                   ↓
-  Claude API (Jimmy)                              e-invoice.be PDF conversion
+  Groq API / Llama 4 Scout (Jimmy)                e-invoice.be PDF conversion
   — extracts RAW FACTS only (buyer + line           POST /api/documents/pdf
     items), money-free RawInvoice JSON              (their OCR — we don't build vision)
   — validates completeness, asks follow-up
@@ -67,9 +67,9 @@ Frontend: Lovable (we have free credits) — chat UI, agent trace, invoice previ
 | **Stripe API** | Tristan | Generate payment links after invoice creation (TODO) |
 | **Lovable** | Both | Frontend chat UI (we have event credits) |
 
-Keep the stack minimal. e-invoice.be replaces the XML generator, the validator (it validates on create), **and** document vision — `POST /api/documents/pdf` / `/api/conversion/pdf` OCR a PDF into a document, so we don't build Claude vision. The backend is plain **TypeScript on Node 24** (native type-stripping, zero build) — not FastAPI/Express.
+Keep the stack minimal. e-invoice.be replaces the XML generator, the validator (it validates on create), **and** document vision. The backend is plain **TypeScript on Node 22** (tsx runner, zero build) — not FastAPI/Express.
 
-Secrets live in `backend/.env` (`EINVOICE_API_KEY`; see `backend/.env.example`).
+Secrets live in `backend/.env` (`EINVOICE_API_KEY`, `GROQ_API_KEY`; see `backend/.env.example`).
 
 ---
 
@@ -77,12 +77,12 @@ Secrets live in `backend/.env` (`EINVOICE_API_KEY`; see `backend/.env.example`).
 
 Jimmy's extraction layer outputs a **money-free `RawInvoice`** — raw facts only. The backend's money engine (`money.ts`) computes every euro amount and the journal; the mapping layer (`mapping.ts`) turns that into e-invoice.be's flat body. **`RawInvoice` (in `backend/src/types.ts`) is the interface between us.**
 
-> Hard rule: the extraction layer emits **no euro amounts** — no line totals, no subtotal/VAT/total, no journal. `vat_rate` is a **fraction** (`0.21`), not a percentage. If the LLM output contains a computed total, it's wrong. This is what lets us claim "the AI never touches a euro."
+> Hard rule: the extraction layer emits **no euro amounts** — no line totals, no subtotal/VAT/total, no journal. `vat_rate` is a **fraction** (`0.21`), not a percentage. This is what lets us claim "the AI never touches a euro."
 
 Fields come from three sources:
-- **Claude extracts** — buyer + line items, from user input each time
-- **Seller profile** — set once; held by the backend (`sample.ts`), injected at compute time
-- **Auto-computed by the backend** — invoice number (sequential), due date (issue + 30 days), all line/VAT/totals, tax breakdown, journal entries
+- **Groq extracts** — buyer + line items, from user input each time
+- **Seller profile** — set once in `extraction.ts`; injected at extraction time (never seen by the LLM)
+- **Auto-computed by the backend** — invoice number, due date, all line/VAT/totals, tax breakdown, journal entries
 
 ```jsonc
 // RawInvoice — what Jimmy's extractor emits (money-free)
@@ -92,28 +92,30 @@ Fields come from three sources:
     "due_date": "2026-07-27",     // optional — backend defaults to issue + 30d
     "currency": "EUR"             // optional — defaults EUR
   },
-  "seller": {                     // from profile (backend holds this; shown for completeness)
-    "name": "Jimmy Zhang Consulting",
-    "vat_number": "BE0123456789",
-    "address": "Rue Picard 11, 1000 Brussels",
+  "seller": {
+    // Sandbox tenant identity — matches the e-invoice.be account (GET /api/me)
+    "name": "Test Company BV",
+    "vat_number": "BE0999465828",
+    "company_id": "0999465828",   // CBE number — drives sender Peppol ID (scheme 0208)
+    "address": "Teststraat 1, 1000 Brussel, Belgium",
     "country_code": "BE",
-    "email": "jimmy@example.com",
+    "email": "tristan@cott.am",
     "iban": "BE68539007547034",
-    "bank_name": "BNP Paribas Fortis"
+    "bank_name": "BNP Paribas Fortis",
+    "peppol_scheme": "0208",
+    "peppol_id": "0999465828"
   },
   "buyer": {
     "name": "Acme Corp",
-    "vat_number": "BE0987654321",
+    "vat_number": "BE0987654321",  // backend derives customer_peppol_id from this
     "address": "Avenue Louise 1, 1050 Brussels",
     "country_code": "BE",
     "email": "accounts@acme.com",
-    "buyer_reference": "PO-4521", // optional PO number
-    "peppol_scheme": "9925",      // EAS code: 9925 = BE VAT, 0208 = BE CBE
-    "peppol_id": "BE0987654321"
+    "buyer_reference": "PO-4521"  // optional PO number
   },
   "line_items": [
     {
-      "description": "Consulting services — June 2026",
+      "description": "Consulting services",
       "quantity": 3,
       "unit_code": "DAY",         // UN/ECE: DAY, HUR, C62 (each)
       "unit_price": 600.00,
@@ -124,52 +126,26 @@ Fields come from three sources:
 }
 ```
 
-The backend's `computeInvoice()` turns that into a `ComputedInvoice` — adding `line_net`/`line_tax` per item, a per-category `tax_breakdown`, `totals` (`subtotal`/`vat_amount`/`total`), and the balanced `journal_entries` (Dr AR / Cr Revenue / Cr VAT Payable). All deterministic, all in code.
-
 **Key field notes:**
-- `document_type` is always `"INVOICE"`, `direction` `"OUTBOUND"` — set by the mapping layer
-- `unit_code`: UN/ECE unit codes — `DAY`, `HUR` (hour), `C62` (unit/each)
-- `vat_rate`: fraction (`0.21`); the mapping layer converts to the percentage (`21`) e-invoice.be wants
-- `vat_category_code`: `"S"` = standard (21% BE); `"Z"` = zero-rated; `"E"` = exempt — optional, backend defaults from the rate
-- `peppol_scheme`/`peppol_id`: combined to `customer_peppol_id` (`"9925:BE0987654321"`); the seller's scheme is hardcoded `9925`
+- `unit_code`: UN/ECE — `DAY`, `HUR` (hour), `C62` (unit/each)
+- `vat_rate`: fraction (`0.21`); mapping layer converts to percentage (`21`) for e-invoice.be
+- `vat_category_code`: `"S"` standard, `"Z"` zero-rated, `"E"` exempt — optional, backend defaults from rate
+- `buyer.peppol_*`: optional — backend derives `"9925:BE<vat>"` from `vat_number` if absent
+- `seller.company_id` + `peppol_scheme` + `peppol_id`: required — identifies the sender on Peppol (scheme 0208 = BE CBE)
 - `buyer_reference`: optional PO number → `purchase_order`
-- `tax_breakdown` / `journal_entries`: computed by `money.ts`, **not** part of the handoff
 
 ---
 
-## e-invoice.be Integration (Outbound) — Tristan ✅ built (`backend/src/einvoice.ts`)
+## e-invoice.be Integration (Outbound) — Tristan ✅ verified end-to-end
 
-**Auth:** `Authorization: Bearer $EINVOICE_API_KEY` (from `backend/.env`). Base URL `https://api.e-invoice.be` (override via `EINVOICE_BASE_URL`). Implemented with plain `fetch`, no SDK. Sandbox = free; on create it validates + serializes like prod, and `/send` with an `email` param emails the UBL back instead of routing (perfect for the demo).
+**Auth:** `Authorization: Bearer $EINVOICE_API_KEY` (from `backend/.env`). Base URL `https://api.e-invoice.be`. Implemented with plain `fetch`, no SDK.
 
-**Flow (driven by `backend/src/test-send.ts`, `--dry` for offline):**
-1. `POST /api/documents/` — body is the **flat** `DocumentCreate` from `toDocumentCreate()`. Returns `{ id, state }`. Validates here; errors surface as readable hints (`asError`).
-2. `POST /api/documents/{id}/send` — Peppol IDs as **query params**: `sender_peppol_scheme`, `sender_peppol_id`, `receiver_peppol_scheme`, `receiver_peppol_id`, and `email` (sandbox delivery). No body.
-3. `GET /api/documents/{id}/ubl` — fetch the generated UBL XML; saved to `backend/out/<INV>.xml` for the demo.
+**Flow:**
+1. `POST /api/documents/` — body is the flat `DocumentCreate` from `toDocumentCreate()`. Returns `{ id, state }`. Validates here.
+2. `POST /api/documents/{id}/send` — Peppol IDs as query params + `email` for sandbox delivery.
+3. `GET /api/documents/{id}/ubl` — follows `signed_url` to fetch the real UBL XML; saved to `backend/out/<INV>.xml`.
 
-**Inbound / photos:** `POST /api/documents/pdf` and `POST /api/conversion/pdf` OCR a PDF into a structured document — this is our "vision," and the path for the inbound stretch goal.
-
-> Peppol IDs: Belgian companies use scheme `0208` (enterprise/CBE number) or `9925` (BE VAT). Verify a receiver with `GET /api/lookup` / `GET /api/validate/peppol-id` before send.
-
-**Mapping: `ComputedInvoice` → `DocumentCreate` (`toDocumentCreate()`; their schema is FLAT, `tax_rate` is a percentage like `21`, not `0.21`):**
-
-| Computed invoice | e-invoice.be field |
-|---|---|
-| `meta.invoice_number` | `invoice_id` |
-| `meta.issue_date` | `invoice_date` |
-| `meta.due_date` | `due_date` |
-| `meta.currency` | `currency` |
-| (constant) | `document_type` = `"INVOICE"`, `direction` = `"OUTBOUND"` |
-| `seller.name` / `vat_number` / `address` / `email` | `vendor_name` / `vendor_tax_id` / `vendor_address` / `vendor_email` |
-| `seller.iban` | `payment_details[0].iban` |
-| `buyer.name` / `vat_number` / `address` / `email` | `customer_name` / `customer_tax_id` / `customer_address` / `customer_email` |
-| `buyer.peppol_scheme`+`peppol_id` | `customer_peppol_id` (`"scheme:id"`) |
-| `buyer.buyer_reference` | `purchase_order` |
-| `line_items[]` | `items[]`: `description`, `quantity`, `unit_code`→`unit`, `unit_price`, `line_net`→`amount`, `line_tax`→`tax`, `vat_rate*100`→`tax_rate` |
-| `tax_breakdown[]` | `tax_details[]`: `tax_amount`→`amount`, `vat_rate*100`→`rate` (string) |
-| `totals.subtotal` / `vat_amount` / `total` | `subtotal` / `total_tax` / `invoice_total` (also `amount_due`) |
-| first line's `vat_category_code` | `tax_code` |
-
-`RawInvoice` → `computeInvoice()` → `ComputedInvoice` → `toDocumentCreate()` → `DocumentCreate`. The computed invoice is the internal source of truth; the mapping is a small pure function.
+**Verified:** create (DRAFT) → send (TRANSIT) → validated EN16931/PEPPOL UBL ✅
 
 ---
 
@@ -177,51 +153,39 @@ The backend's `computeInvoice()` turns that into a `ComputedInvoice` — adding 
 
 ### Jimmy — Agent & Extraction Layer (`backend/src/extraction.ts`)
 
-**Done:** `extraction.ts` — Groq (Llama 4 Scout) extracts money-free `RawInvoice` from messy text, matching `types.ts` exactly.
-
 - [x] Groq extraction — emits `RawInvoice`, multilingual (EN/FR/NL)
 - [x] `vat_rate` as fraction (0.21), no amounts, no totals
 - [x] `formatConfirmation()` — human-readable summary before sending
 - [x] Missing fields detection
-- [ ] Prompt hardening — test against 5+ messy input formats
+- [x] Prompt hardening — 5 edge cases (total→unit price, missing VAT, mixed rates, French, fractional quantity)
+- [x] Seller profile synced with types.ts (`company_id`, `peppol_scheme`, `peppol_id`)
 - [ ] Wire into HTTP endpoint so frontend can call it
-- [x] ~~Python agent~~ — replaced by `backend/src/extraction.ts`
-- [x] ~~Claude vision~~ — dropped; e-invoice.be `POST /api/documents/pdf` OCRs PDFs/photos
-
-**Key fields extracted:**  
-Buyer name + VAT + email + address, line items (description, qty, `unit_code`, `unit_price`, `vat_rate` as fraction), issue date. Seller from profile; all amounts backend-computed.
 
 ### Tristan — Backend, PEPPOL & Stripe (`backend/`)
 
-**Done:** TypeScript backend (Node 24, zero build) — deterministic money engine + mapping + e-invoice.be client, working end-to-end via `test-send.ts`.
-
-- [x] Deterministic money engine — line/VAT/totals + balanced journal in code, NOT the LLM (`money.ts`)
+- [x] Deterministic money engine — line/VAT/totals + balanced journal (`money.ts`)
 - [x] `toDocumentCreate()` mapping function (`mapping.ts`)
-- [x] e-invoice.be `POST /documents` → `POST /{id}/send` (sandbox key from `.env`, `email` delivery) (`einvoice.ts`)
-- [x] Fetch generated UBL (`GET /{id}/ubl`) — saved to `out/<INV>.xml`
-- [ ] Stripe payment link creation on invoice confirmation
-- [ ] Glue: accept Jimmy's `RawInvoice` (HTTP endpoint or import) instead of the `sample.ts` fixture
-- [ ] Wire up Lovable frontend to backend
-- [ ] PDF invoice generation (optional — or reuse e-invoice.be's PDF)
-
-**Compliance is handled by e-invoice.be** — they generate EN16931/schematron-valid UBL and validate on create. We just send correct, complete JSON.
+- [x] e-invoice.be create → send → UBL fetch, end-to-end verified (`einvoice.ts`)
+- [x] Derive `customer_peppol_id` from `buyer.vat_number` when no explicit peppol fields
+- [x] Seller `company_id`/`peppol_scheme`/`peppol_id` wired to sender Peppol ID
+- [ ] Stripe payment link creation
+- [ ] HTTP endpoint: raw text → `extractInvoice()` → `computeInvoice()` → `create()` → `send()`
+- [ ] Wire up Lovable frontend
 
 ---
 
 ## STRETCH (post-MVP only) — Inbound / Auto-Booking Purchases
 
-**Do NOT start until the outbound demo is end-to-end and rehearsed.** Outbound alone is a complete, winning demo. Inbound roughly doubles the "accountant just signs" story (covers Accounts Payable too) but adds nothing if outbound is shaky.
+**Do NOT start until the outbound demo is rehearsed.**
 
-- [ ] Poll `GET /api/inbox/invoices` (simpler than webhooks for a demo) or register `POST /api/webhooks/`
-- [ ] Use `POST /api/documents/pdf` to OCR a supplier PDF into a document
-- [ ] Reuse the bookkeeping engine to book a *purchase*: Dr Expense / Dr VAT recoverable / Cr Accounts Payable
-- [ ] Demo: feed a sample supplier invoice → agent books it → ledger shows sale **and** purchase, balanced
-
-> Sandbox sends don't route to real third parties, so for the inbound demo, feed a sample supplier document into the handler manually — identical code path.
+- [ ] Poll `GET /api/inbox/invoices` or register `POST /api/webhooks/`
+- [ ] Use `POST /api/documents/pdf` to OCR a supplier PDF
+- [ ] Book a purchase: Dr Expense / Dr VAT recoverable / Cr Accounts Payable
+- [ ] Demo: supplier invoice arrives, books itself, ledger stays balanced
 
 ---
 
-## Judging Criteria (what to optimise for)
+## Judging Criteria
 
 1. **Automation depth** — invoice → PEPPOL → double-entry, no human steps except sign-off
 2. **Trust & compliance** — PEPPOL-valid, correct VAT, auditable
@@ -235,10 +199,10 @@ Buyer name + VAT + email + address, line items (description, qty, `unit_code`, `
 
 1. *"Belgian SMEs face fines for non-compliant invoicing. Compliance tools are built for accountants, not business owners with a phone."*
 2. Live demo: type or photo → agent confirms fields → PEPPOL invoice transmitted via e-invoice.be (show the real UBL) → Stripe payment link sent
-3. Show journal entries logged automatically — *"deterministic code does the accounting, the AI never touches a euro amount."*
+3. Show journal entries — *"deterministic code does the accounting, the AI never touches a euro amount."*
 4. *"The accountant just signs. Everything else is handled."*
-5. Show the Stripe receipt if paid during the day, and the cash flag earned for a real compliant invoice.
-6. (If inbound stretch landed) *"...and it works both ways"* — supplier invoice arrives, books itself, ledger stays balanced.
+5. Show the Stripe receipt and the cash flag earned for a real compliant invoice.
+6. (If inbound stretch landed) *"...and it works both ways"* — supplier invoice arrives, books itself.
 
 ---
 
@@ -246,10 +210,9 @@ Buyer name + VAT + email + address, line items (description, qty, `unit_code`, `
 
 | Time | Jimmy | Tristan |
 |---|---|---|
-| Now → 12:30 | Extraction prompt → `RawInvoice` + validation loop | ✅ money engine + e-invoice.be client (done) → Stripe |
-| 12:30–13:00 | Lunch — integration sync on `RawInvoice` | Lunch |
-| 13:00–15:00 | Prompt hardening + follow-up loop | Glue (accept `RawInvoice`) + Lovable frontend |
-| 15:00–17:00 | End-to-end integration testing | End-to-end integration testing |
+| ✅ Done | Extraction + edge case hardening + seller profile sync | Money engine + e-invoice.be client, end-to-end verified |
+| Now → 15:00 | Support integration / frontend | HTTP endpoint glue + Stripe payment link |
+| 15:00–17:00 | End-to-end integration + Lovable frontend | End-to-end integration + Lovable frontend |
 | 17:00–18:00 | Pitch prep + demo rehearsal | Pitch prep + demo rehearsal |
 | 18:00 | **Pitches** | **Pitches** |
 
@@ -259,17 +222,18 @@ Buyer name + VAT + email + address, line items (description, qty, `unit_code`, `
 
 ```
 e-invoicing-hackathon/
-├── agent/                  # Jimmy — Claude extraction → RawInvoice
-│   └── extraction_prompt.py
-├── backend/                # Tristan — TypeScript (Node 24, zero build)
+├── backend/                # TypeScript (Node 22, tsx runner — zero build)
 │   ├── src/
 │   │   ├── types.ts        # RawInvoice / ComputedInvoice / DocumentCreate
 │   │   ├── money.ts        # deterministic money engine + journal
 │   │   ├── mapping.ts      # toDocumentCreate()
 │   │   ├── einvoice.ts     # e-invoice.be client (create / send / ubl)
-│   │   ├── sample.ts       # sample RawInvoice fixture
-│   │   └── test-send.ts    # end-to-end CLI (--dry)
-│   └── .env.example        # EINVOICE_API_KEY template
+│   │   ├── extraction.ts   # Groq extraction agent → RawInvoice (Jimmy)
+│   │   ├── sample.ts       # sample RawInvoice fixture (Tristan's test)
+│   │   └── test-send.ts    # end-to-end CLI
+│   ├── out/                # generated UBL XML saved here
+│   ├── .env                # secrets (not committed)
+│   └── .env.example        # template
 ├── api/                    # shared contract (placeholder)
 ├── openapi.json            # e-invoice.be API spec (reference)
 └── track1-plan.md
