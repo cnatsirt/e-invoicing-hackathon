@@ -16,9 +16,11 @@ A WhatsApp-style chat interface where a business owner sends something like:
 ...and the agent:
 1. Extracts all structured fields (vendor, buyer, line items, VAT, amounts, dates)
 2. Confirms with the user
-3. Sends to e-invoice.be API → PEPPOL-compliant invoice transmitted automatically
+3. Generates a PEPPOL BIS 3.0 invoice via the **e-invoice.be API** (JSON → validated UBL) and **sends it over Peppol**
 4. Creates a Stripe payment link and sends it to the client
-5. Displays double-entry journal entries (Debit AR / Credit Revenue)
+5. Logs the double-entry journal entries automatically (Dr AR / Cr Revenue / Cr VAT Payable)
+
+> **We do NOT hand-roll UBL XML.** e-invoice.be (Track 1 sponsor; their CTO is a judge) is a JSON-in → valid-UBL-out certified Peppol access point with a free sandbox. We POST flat JSON, they generate EN16931/schematron-valid UBL and route it. Building on the sponsor's rails = faster, more reliable, and the strongest possible compliance story. The cash flags ("compliant invoices created earn immediate payment") almost certainly fire through their pipeline.
 
 **Live demo moment:** submit a real invoice during the hackathon → collect the cash flag on the spot.
 
@@ -52,6 +54,7 @@ Frontend: Lovable (we have free credits) — chat UI, agent trace, invoice previ
 
 | Service | Who | What For |
 |---|---|---|
+<<<<<<< Updated upstream
 | **Anthropic API** (Claude) | Jimmy | Extraction, reasoning, vision for receipt photos |
 | **e-invoice.be API** | Tristan | JSON → PEPPOL UBL conversion + network transmission (replaces XML generator) |
 | **Stripe API** | Tristan | Generate payment links after invoice creation |
@@ -60,6 +63,14 @@ Frontend: Lovable (we have free credits) — chat UI, agent trace, invoice previ
 **Key insight:** e-invoice.be is a certified PEPPOL Access Point. Tristan does NOT need to write an XML generator — just POST JSON to their API and they handle everything including transmission.
 
 e-invoice.be sandbox API key: in `.env` as `E_INVOICE_API_KEY`
+=======
+| **Anthropic API** (Claude) | Jimmy | Extraction, reasoning, vision (receipt photos) |
+| **e-invoice.be API** | Tristan | JSON → validated PEPPOL UBL + send over Peppol (replaces hand-rolled XML) |
+| **Stripe API** | Tristan | Generate payment links after invoice creation |
+| **Lovable** | Both | Frontend chat UI (we have event credits) |
+
+No other APIs needed. Keep the stack minimal. e-invoice.be replaces both the XML generator *and* the test validator — it validates on create.
+>>>>>>> Stashed changes
 
 ---
 
@@ -139,6 +150,40 @@ Auth: `Authorization: Bearer <E_INVOICE_API_KEY>`
 
 ---
 
+## e-invoice.be Integration (Outbound) — Tristan
+
+**Auth:** `Authorization: Bearer <SANDBOX_API_KEY>`. Base URL `https://api.e-invoice.be`.
+SDKs exist (`e-invoice-api` on npm/pip) or just use `fetch`. Sandbox = free; on create it validates + serializes like prod, and `/send` with an `email` param emails the UBL back instead of routing (perfect for the demo).
+
+**Two-call flow:**
+1. `POST /api/documents/` — body is the **flat** `DocumentCreate` (mapping below). Returns `{ id, ... }`. Validates here; errors come back as readable hints.
+2. `POST /api/documents/{id}/send` — Peppol IDs as **query params**: `sender_peppol_scheme`, `sender_peppol_id`, `receiver_peppol_scheme`, `receiver_peppol_id`, and `email` (sandbox delivery). No body.
+3. (optional) `GET /api/documents/{id}/ubl` — fetch the generated UBL XML to show in the demo.
+
+> Peppol IDs: Belgian companies use scheme `0208` (enterprise/CBE number) or `9925` (BE VAT). Verify a receiver with `GET /api/lookup` / `GET /api/validate/peppol-id` before send.
+
+**Mapping: our JSON contract → `DocumentCreate` (their schema is FLAT, `tax_rate` is a percentage like `21`, not `0.21`):**
+
+| Our contract | e-invoice.be field |
+|---|---|
+| `meta.invoice_number` | `invoice_id` |
+| `meta.issue_date` | `invoice_date` |
+| `meta.due_date` | `due_date` |
+| `meta.currency` | `currency` |
+| `seller.name` / `vat_number` / `address` / `email` | `vendor_name` / `vendor_tax_id` / `vendor_address` / `vendor_email` |
+| `seller.iban` | `payment_details[0].iban` |
+| `buyer.name` / `vat_number` / `address` / `email` | `customer_name` / `customer_tax_id` / `customer_address` / `customer_email` |
+| buyer Peppol ID | `customer_peppol_id` |
+| `buyer.buyer_reference` | `purchase_order` |
+| `line_items[]` | `items[]`: `description`, `quantity`, `unit_price`, `line_total`→`amount`, `vat_rate*100`→`tax_rate`, line VAT→`tax`, `unit_code`→`unit` |
+| `tax_breakdown[]` | `tax_details[]`: `tax_amount`→`amount`, `vat_rate*100`→`rate` (string) |
+| `totals.subtotal` / `vat_amount` / `total` | `subtotal` / `total_tax` / `invoice_total` (also `amount_due`) |
+| `line_items[].vat_category_code` | `tax_code` |
+
+Keep our rich contract as the internal source of truth; this mapping is a small pure function `toDocumentCreate(contract)`.
+
+---
+
 ## Division of Labour
 
 ### Jimmy — Agent & Extraction Layer (`agent/`)
@@ -154,10 +199,44 @@ Auth: `Authorization: Bearer <E_INVOICE_API_KEY>`
 
 ### Tristan — Backend & Frontend (`backend/`)
 
+<<<<<<< Updated upstream
 - [ ] Stripe payment link creation after invoice confirmed
 - [ ] Wire `POST /agent/confirm` to call Stripe after e-invoice.be send
 - [ ] Lovable frontend: chat UI + confirmation display + journal entries
 - [ ] Connect frontend to Jimmy's FastAPI endpoints
+=======
+**Key fields Claude must extract reliably:**  
+Seller name + VAT, buyer name + VAT + email, line items (description, qty, unit price), VAT rate (default 21% Belgium), issue date, due date, currency (default EUR).
+
+---
+
+### Tristan — Backend, PEPPOL & Stripe
+
+**Immediate priority:** Backend skeleton + `toDocumentCreate()` mapping + e-invoice.be create/send working against the sandbox.
+
+- [ ] Backend API (FastAPI or Express) with `/extract`, `/generate-invoice` (create+send), `/create-payment-link` endpoints
+- [ ] `toDocumentCreate(contract)` mapping function (table above)
+- [ ] e-invoice.be `POST /documents` then `POST /{id}/send` (sandbox key, `email` delivery)
+- [ ] Deterministic money engine: compute line totals, `tax_breakdown`, `totals`, `journal_entries` in code (NOT the LLM)
+- [ ] Stripe payment link creation on invoice confirmation
+- [ ] Fetch + display generated UBL (`GET /documents/{id}/ubl`) for the demo
+- [ ] PDF invoice generation (optional but good for demo)
+- [ ] Wire up Lovable frontend to backend
+
+**Compliance is handled by e-invoice.be** — they generate EN16931/schematron-valid UBL and validate on create. We just send correct, complete JSON.
+
+---
+
+## STRETCH (post-MVP only) — Inbound / Auto-Booking Purchases
+
+**Do NOT start until the outbound demo is end-to-end and rehearsed.** Outbound alone is a complete, winning demo. Inbound roughly doubles the "accountant just signs" story (covers Accounts Payable too) but adds nothing if outbound is shaky.
+
+- [ ] Poll `GET /api/inbox/invoices` (simpler than webhooks for a demo) or register `POST /api/webhooks/`
+- [ ] Reuse the bookkeeping engine to book a *purchase*: Dr Expense / Dr VAT recoverable / Cr Accounts Payable
+- [ ] Demo: feed a sample supplier UBL → agent books it → ledger shows sale **and** purchase, balanced
+
+> Sandbox sends don't route to real third parties, so for the inbound demo, feed a sample supplier UBL into the handler manually — identical code path.
+>>>>>>> Stashed changes
 
 ---
 
@@ -173,11 +252,13 @@ Auth: `Authorization: Bearer <E_INVOICE_API_KEY>`
 
 ## The 5-Minute Pitch Flow
 
-1. *"Belgian SMEs face fines for non-compliant invoicing. Compliance tools are built for accountants, not business owners."*
+1. *"Belgian SMEs face fines for non-compliant invoicing. Compliance tools are built for accountants, not business owners with a phone."*
 2. Live demo: type or photo → agent confirms fields → PEPPOL invoice transmitted → Stripe payment link sent
-3. Show journal entries logged automatically
+3. Show journal entries logged automatically — *"deterministic code does the accounting, the AI never touches a euro amount."*
 4. *"The accountant just signs. Everything else is handled."*
 5. Show the Stripe receipt from the cash flag invoice we sent during the day.
+5. Show the Stripe receipt if paid during the day, and the cash flag earned for a real compliant invoice.
+6. (If inbound stretch landed) *"...and it works both ways"* — supplier invoice arrives, books itself, ledger stays balanced.
 
 ---
 
