@@ -19,7 +19,7 @@ const groq = new Groq(); // reads GROQ_API_KEY from env
 // ---------------------------------------------------------------------------
 // Seller profile — update with real details before demo
 // ---------------------------------------------------------------------------
-const SELLER_PROFILE = {
+export const SELLER_PROFILE = {
   // Sandbox tenant identity — matches the e-invoice.be account (GET /api/me)
   name: "Test Company BV",
   vat_number: "BE0999465828",

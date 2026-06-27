@@ -8,11 +8,10 @@
  * Closes the "glue: accept RawInvoice" TODO — this is what the frontend calls.
  */
 import { writeFileSync, mkdirSync } from "node:fs";
-import { extractInvoice, formatConfirmation } from "./extraction.ts";
+import { extractInvoice, formatConfirmation, SELLER_PROFILE } from "./extraction.ts";
 import { computeInvoice } from "./money.ts";
 import { toDocumentCreate } from "./mapping.ts";
 import { createDocument, sendDocument, getUbl } from "./einvoice.ts";
-import { sampleInvoice } from "./sample.ts";
 import type { RawInvoice } from "./types.ts";
 
 const DRY = process.argv.includes("--dry");
@@ -39,10 +38,8 @@ async function main() {
     return;
   }
 
-  // The seller is backend-owned config, not extracted. For the e-invoice.be
-  // sandbox the sender must be an identity the tenant owns, so override the
-  // placeholder profile with our canonical sandbox seller (sample.ts).
-  const raw: RawInvoice = { ...extracted, seller: sampleInvoice.seller };
+  // Seller is backend-owned config (single source of truth: extraction.ts).
+  const raw: RawInvoice = { ...extracted, seller: SELLER_PROFILE };
 
   console.log("\n" + formatConfirmation(raw));
 
