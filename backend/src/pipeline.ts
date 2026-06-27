@@ -12,14 +12,15 @@ import { extractInvoice, formatConfirmation } from "./extraction.ts";
 import { computeInvoice } from "./money.ts";
 import { toDocumentCreate } from "./mapping.ts";
 import { createDocument, sendDocument, getUbl } from "./einvoice.ts";
-import { createPaymentLink } from "./stripe.ts";
+import { createPaymentLink, assertStripeConfigured } from "./stripe.ts";
 import { SELLER } from "./seller.ts";
 import type { RawInvoice } from "./types.ts";
 
 const DRY = process.argv.includes("--dry");
+const NO_STRIPE = process.argv.includes("--no-stripe");
 const message = process.argv
   .slice(2)
-  .filter((a) => a !== "--dry")
+  .filter((a) => a !== "--dry" && a !== "--no-stripe")
   .join(" ")
   .trim();
 
@@ -31,6 +32,10 @@ async function main() {
   if (!message) {
     throw new Error('Provide an invoice message, e.g. npm run pipeline -- "Invoice Acme …"');
   }
+
+  // Fail fast on Stripe config BEFORE the irreversible Peppol send, so we never
+  // send an invoice we can't bill. Use --no-stripe to skip on purpose.
+  if (!NO_STRIPE) assertStripeConfigured();
 
   // 1) Extract RAW FACTS via Groq (no euros — money.ts owns every amount)
   console.log(`\n→ extracting via Groq: "${message.slice(0, 72)}${message.length > 72 ? "…" : ""}"`);
@@ -87,17 +92,25 @@ async function main() {
   writeFileSync(path, ubl);
   console.log(`  saved ${ubl.length} bytes → backend/${path}`);
 
-  // 5) Stripe payment link for the invoice total. Non-fatal: the compliance
-  // flow already succeeded, so a Stripe config issue must not fail the run.
+  // 5) Stripe payment link for the invoice total. The key was validated up
+  // front, but the invoice is now already sent — so a transient failure here
+  // can't be undone. Report it loudly and exit non-zero rather than print ✅.
+  if (NO_STRIPE) {
+    console.log("\n✅ Pipeline OK: text → Groq → money engine → PEPPOL UBL sent (Stripe skipped via --no-stripe).");
+    return;
+  }
   console.log("→ creating Stripe payment link …");
   try {
     const pay = await createPaymentLink(inv);
     console.log(`  payment link: ${pay.url}`);
   } catch (e) {
-    console.log(`  ⚠️  Stripe skipped: ${e instanceof Error ? e.message : String(e)}`);
+    console.error(`\n⚠️  INVOICE SENT but Stripe payment link FAILED: ${e instanceof Error ? e.message : String(e)}`);
+    console.error("   The invoice is already out over Peppol — generate the link manually.");
+    process.exitCode = 1;
+    return;
   }
 
-  console.log("\n✅ Full pipeline OK: text → Groq → money engine → validated PEPPOL UBL sent.");
+  console.log("\n✅ Full pipeline OK: text → Groq → money engine → PEPPOL UBL sent + Stripe payment link.");
 }
 
 main().catch((err) => {
