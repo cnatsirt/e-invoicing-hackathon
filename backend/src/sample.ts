@@ -9,13 +9,18 @@ export const sampleInvoice: RawInvoice = {
     currency: "EUR",
   },
   seller: {
-    name: "Jimmy Zhang Consulting",
-    vat_number: "BE0123456789",
-    address: "Rue Picard 11, 1000 Brussels, Belgium",
+    // The sandbox tenant's own identity (GET /api/me) — required: the sender
+    // Peppol ID must be one the tenant owns.
+    name: "Test Company BV",
+    vat_number: "BE0999465828", // create derives the sender Peppol ID from this (BE + CBE)
+    company_id: "0999465828",
+    address: "Teststraat 1, 1000 Brussel, Belgium",
     country_code: "BE",
-    email: "jimmy@example.com",
+    email: "tristan@cott.am",
     iban: "BE68539007547034",
     bank_name: "BNP Paribas Fortis",
+    peppol_scheme: "0208", // BE CBE/enterprise number
+    peppol_id: "0999465828",
   },
   buyer: {
     name: "Acme Corp",
@@ -24,8 +29,8 @@ export const sampleInvoice: RawInvoice = {
     country_code: "BE",
     email: "accounts@acme.com",
     buyer_reference: "PO-4521",
-    peppol_scheme: "9925", // Belgian VAT
-    peppol_id: "BE0987654321",
+    // No peppol_* — the backend derives "9925:BE0987654321" from vat_number,
+    // mirroring what the extractor emits (buyer with just a VAT number).
   },
   line_items: [
     {

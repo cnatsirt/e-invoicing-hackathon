@@ -46,8 +46,8 @@ async function main() {
   const email = process.env.DEMO_EMAIL ?? inv.seller.email;
   console.log(`→ POST /api/documents/${created.id}/send  (email → ${email}) …`);
   const sent = await sendDocument(created.id, {
-    sender_peppol_scheme: "9925",
-    sender_peppol_id: inv.seller.vat_number,
+    sender_peppol_scheme: inv.seller.peppol_scheme,
+    sender_peppol_id: inv.seller.peppol_id,
     receiver_peppol_scheme: inv.buyer.peppol_scheme,
     receiver_peppol_id: inv.buyer.peppol_id,
     email,

@@ -14,6 +14,9 @@ export interface Party {
 export interface Seller extends Party {
   iban?: string;
   bank_name?: string;
+  company_id?: string; // CBE/enterprise number, e.g. "0999465828"
+  peppol_scheme?: string; // our own EAS code, e.g. "0208" (BE CBE)
+  peppol_id?: string; // our own participant id — the sender
 }
 
 export interface Buyer extends Party {
@@ -101,6 +104,7 @@ export interface DocumentCreate {
   vendor_email?: string;
   vendor_address?: string;
   vendor_tax_id?: string;
+  vendor_company_id?: string; // resolves the sender Peppol ID (scheme 0208)
 
   customer_name: string;
   customer_email?: string;

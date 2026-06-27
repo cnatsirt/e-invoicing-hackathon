@@ -71,10 +71,16 @@ export async function sendDocument(
   return (await res.json()) as DocumentResponse;
 }
 
+// The /ubl endpoint returns a JSON envelope ({ signed_url, ... }), not the XML
+// itself — the actual UBL lives behind a short-lived signed URL. Follow it.
 export async function getUbl(documentId: string): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/documents/${documentId}/ubl`, {
     headers: { Authorization: `Bearer ${apiKey()}` },
   });
   if (!res.ok) throw await asError(res);
-  return await res.text();
+  const { signed_url } = (await res.json()) as { signed_url?: string };
+  if (!signed_url) throw new Error("No signed_url in UBL response");
+  const xml = await fetch(signed_url);
+  if (!xml.ok) throw await asError(xml);
+  return await xml.text();
 }

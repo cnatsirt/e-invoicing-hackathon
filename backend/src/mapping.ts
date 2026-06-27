@@ -3,6 +3,20 @@ import { round2 } from "./money.ts";
 
 const pct = (rate: number) => round2(rate * 100); // 0.21 -> 21
 
+// Receiver routing ID. An explicit buyer.peppol_* wins; otherwise derive it
+// from the VAT number (Belgian default scheme 9925 = VAT, "9925:BE0987654321").
+// create() needs this to derive the receiver, so a buyer must carry either
+// peppol_* or a vat_number.
+function customerPeppolId(buyer: ComputedInvoice["buyer"]): string | undefined {
+  if (buyer.peppol_scheme && buyer.peppol_id) {
+    return `${buyer.peppol_scheme}:${buyer.peppol_id}`;
+  }
+  if (buyer.vat_number) {
+    return `9925:${buyer.vat_number.replace(/\s+/g, "")}`;
+  }
+  return undefined;
+}
+
 /**
  * Pure mapping from our internal computed invoice to e-invoice.be's flat
  * DocumentCreate body. Their schema is flat, tax_rate is a PERCENTAGE.
@@ -22,15 +36,13 @@ export function toDocumentCreate(inv: ComputedInvoice): DocumentCreate {
     vendor_email: inv.seller.email,
     vendor_address: inv.seller.address,
     vendor_tax_id: inv.seller.vat_number,
+    vendor_company_id: inv.seller.company_id,
 
     customer_name: inv.buyer.name,
     customer_email: inv.buyer.email,
     customer_address: inv.buyer.address,
     customer_tax_id: inv.buyer.vat_number,
-    customer_peppol_id:
-      inv.buyer.peppol_scheme && inv.buyer.peppol_id
-        ? `${inv.buyer.peppol_scheme}:${inv.buyer.peppol_id}`
-        : undefined,
+    customer_peppol_id: customerPeppolId(inv.buyer),
     purchase_order: inv.buyer.buyer_reference,
 
     tax_code: overallTaxCode,
