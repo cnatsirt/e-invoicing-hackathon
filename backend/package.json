@@ -6,10 +6,15 @@
   "description": "Track 1 — agentic e-invoicing backend (deterministic money engine + e-invoice.be client)",
   "scripts": {
     "send": "node --env-file-if-exists=.env src/test-send.ts",
+    "extract": "npx tsx --env-file=.env src/extraction.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "groq-sdk": "^0.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
+    "tsx": "^4.19.0",
     "typescript": "^5.9.0"
   }
 }

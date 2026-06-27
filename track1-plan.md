@@ -175,21 +175,21 @@ The backend's `computeInvoice()` turns that into a `ComputedInvoice` — adding 
 
 ## Division of Labour
 
-### Jimmy — Agent & Extraction Layer (`agent/`)
+### Jimmy — Agent & Extraction Layer (`backend/src/extraction.ts`)
 
-**Immediate priority:** Claude extraction prompt that converts messy chat/voice text into a **money-free `RawInvoice`** (the shape in `backend/src/types.ts`). Raw facts only — `vat_rate` as a fraction, no totals, no journal.
+**Done:** `extraction.ts` — Groq (Llama 4 Scout) extracts money-free `RawInvoice` from messy text, matching `types.ts` exactly.
 
-- [ ] Claude extraction prompt — emits `RawInvoice`, handles text + edge cases, multilingual (EN/FR/NL)
-- [ ] Validation layer — detect missing buyer fields, ask follow-up questions (batched)
-- [ ] Confirmation step — agent summarises extracted facts before proceeding
-- [ ] Prompt hardening — test against at least 5 messy input formats
-- [ ] Hand real `RawInvoice` outputs to Tristan to feed `computeInvoice()` (replaces the `sample.ts` fixture)
-- [x] ~~Claude vision~~ — dropped; e-invoice.be `POST /api/documents/pdf` OCRs PDFs/photos of documents
+- [x] Groq extraction — emits `RawInvoice`, multilingual (EN/FR/NL)
+- [x] `vat_rate` as fraction (0.21), no amounts, no totals
+- [x] `formatConfirmation()` — human-readable summary before sending
+- [x] Missing fields detection
+- [ ] Prompt hardening — test against 5+ messy input formats
+- [ ] Wire into HTTP endpoint so frontend can call it
+- [x] ~~Python agent~~ — replaced by `backend/src/extraction.ts`
+- [x] ~~Claude vision~~ — dropped; e-invoice.be `POST /api/documents/pdf` OCRs PDFs/photos
 
-> Note: `agent/extraction_prompt.py` currently emits the old flat e-invoice format **with LLM-computed amounts**. It must be reworked to emit the money-free `RawInvoice` (or be ported into the TS backend). Until then, agent and backend are not integrated.
-
-**Key fields Claude must extract reliably:**  
-Buyer name + VAT + email + address, line items (description, qty, unit price, unit), VAT rate (default 21% BE, as a fraction), issue date. Seller is from profile; due date / currency / all amounts are backend-computed.
+**Key fields extracted:**  
+Buyer name + VAT + email + address, line items (description, qty, `unit_code`, `unit_price`, `vat_rate` as fraction), issue date. Seller from profile; all amounts backend-computed.
 
 ### Tristan — Backend, PEPPOL & Stripe (`backend/`)
 
