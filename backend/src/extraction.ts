@@ -92,10 +92,14 @@ dates:
 
 unit_price: ALWAYS the per-unit price. If user says "€1800 for 3 days", unit_price = 600.
 
+buyer.name: the company or person being invoiced. Extract even if followed by a colon or punctuation (e.g. "Invoice OpenPeppol: ..." → buyer.name = "OpenPeppol").
+
+description: ALWAYS in English, even if input is French or Dutch. Translate if needed (e.g. "conseil" → "consulting", "reiskosten" → "travel expenses").
+
 DO NOT include: line totals, subtotal, VAT amounts, total, journal entries.
 DO NOT include seller fields (injected by backend).
 
-Language: user may write in English, French, or Dutch. Output field values in English.
+Language: user may write in English, French, or Dutch. Output ALL field values in English.
 
 Missing fields response:
 {"missing_fields": ["buyer.vat_number", "buyer.email"], "partial_data": {...}}
@@ -159,9 +163,16 @@ export function formatConfirmation(invoice: RawInvoice): string {
 // ---------------------------------------------------------------------------
 if (process.argv[1]?.endsWith("extraction.ts")) {
   const tests = [
-    "Invoice Acme Corp for 3 days consulting at €600/day, 21% VAT. Their VAT is BE0848934496, send to accounts@acme.com",
-    "stuur factuur naar Collibra (BE0471938850, billing@collibra.com) voor 8 uur werk aan €95/uur",
-    "Invoice OpenPeppol, 2 days UX workshop €800/day + 1 day report writing €600, all 21% VAT. VAT BE0848934496, billing@openpeppol.org",
+    // Edge case 1: total price given, not unit price
+    "Invoice Acme Corp €1800 for 3 days consulting, 21% VAT. VAT BE0848934496, accounts@acme.com",
+    // Edge case 2: missing VAT number
+    "Invoice Collibra for 2 days workshop at €800/day, billing@collibra.com",
+    // Edge case 3: mixed VAT rates
+    "Invoice OpenPeppol: €500 consulting 21% VAT + €200 travel expenses 0% VAT. BE0848934496, billing@openpeppol.org",
+    // Edge case 4: French input
+    "Facture pour Collibra, 2 jours de conseil à €700/jour, TVA 21%. BE0471938850, billing@collibra.com",
+    // Edge case 5: fractional quantity
+    "Invoice Acme Corp for half a day's work at €800/day, 21% VAT. BE0848934496, accounts@acme.com",
   ];
 
   for (const text of tests) {
