@@ -29,6 +29,12 @@ async function stripePost<T>(path: string, form: Record<string, string>): Promis
   return data as T;
 }
 
+// Fail fast: validate the key before any irreversible work (e.g. sending the
+// invoice over Peppol), so we never issue an invoice we can't bill for.
+export function assertStripeConfigured(): void {
+  apiKey();
+}
+
 export interface PaymentLink {
   id: string;
   url: string;

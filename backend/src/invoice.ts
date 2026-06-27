@@ -36,17 +36,20 @@ export async function extractFromMessage(message: string): Promise<ExtractResult
   };
 }
 
+export interface SendOptions {
+  skipStripe?: boolean;
+}
+
 export interface SendResult {
   document_id: string;
   document_state?: string;
   invoice_number: string;
   ubl_path: string;
   payment_link_url?: string;
-  payment_link_error?: string;
   computed: ComputedInvoice;
 }
 
-export async function sendInvoice(raw: RawInvoice): Promise<SendResult> {
+export async function sendInvoice(raw: RawInvoice, options?: SendOptions): Promise<SendResult> {
   const computed = computeInvoice(raw);
   const body = toDocumentCreate(computed);
 
@@ -66,23 +69,24 @@ export async function sendInvoice(raw: RawInvoice): Promise<SendResult> {
   const ubl_path = `out/${computed.meta.invoice_number}.xml`;
   writeFileSync(ubl_path, ubl);
 
-  // Non-fatal: PEPPOL already succeeded; missing Stripe key must not fail the run.
-  let payment_link_url: string | undefined;
-  let payment_link_error: string | undefined;
-  try {
-    const pay = await createPaymentLink(computed);
-    payment_link_url = pay.url;
-  } catch (e) {
-    payment_link_error = e instanceof Error ? e.message : String(e);
+  if (options?.skipStripe) {
+    return {
+      document_id: created.id,
+      document_state: created.state,
+      invoice_number: computed.meta.invoice_number,
+      ubl_path,
+      computed,
+    };
   }
+
+  const pay = await createPaymentLink(computed);
 
   return {
     document_id: created.id,
     document_state: created.state,
     invoice_number: computed.meta.invoice_number,
     ubl_path,
-    payment_link_url,
-    payment_link_error,
+    payment_link_url: pay.url,
     computed,
   };
 }

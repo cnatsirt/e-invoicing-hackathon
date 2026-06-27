@@ -9,6 +9,7 @@
  */
 import { createServer, type IncomingMessage } from "node:http";
 import { extractFromMessage, sendInvoice } from "./invoice.ts";
+import { assertStripeConfigured } from "./stripe.ts";
 import type { RawInvoice } from "./types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -71,6 +72,7 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: "raw invoice with buyer and line_items is required" });
         return;
       }
+      assertStripeConfigured();
       const result = await sendInvoice(raw);
       json(res, 200, { status: "sent", ...result });
       return;
