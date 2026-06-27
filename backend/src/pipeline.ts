@@ -12,6 +12,7 @@ import { extractInvoice, formatConfirmation } from "./extraction.ts";
 import { computeInvoice } from "./money.ts";
 import { toDocumentCreate } from "./mapping.ts";
 import { createDocument, sendDocument, getUbl } from "./einvoice.ts";
+import { createPaymentLink } from "./stripe.ts";
 import { SELLER } from "./seller.ts";
 import type { RawInvoice } from "./types.ts";
 
@@ -85,6 +86,16 @@ async function main() {
   const path = `out/${inv.meta.invoice_number}.xml`;
   writeFileSync(path, ubl);
   console.log(`  saved ${ubl.length} bytes → backend/${path}`);
+
+  // 5) Stripe payment link for the invoice total. Non-fatal: the compliance
+  // flow already succeeded, so a Stripe config issue must not fail the run.
+  console.log("→ creating Stripe payment link …");
+  try {
+    const pay = await createPaymentLink(inv);
+    console.log(`  payment link: ${pay.url}`);
+  } catch (e) {
+    console.log(`  ⚠️  Stripe skipped: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   console.log("\n✅ Full pipeline OK: text → Groq → money engine → validated PEPPOL UBL sent.");
 }
