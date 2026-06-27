@@ -1,0 +1,15 @@
+{
+  "name": "e-invoicing-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Track 1 — agentic e-invoicing backend (deterministic money engine + e-invoice.be client)",
+  "scripts": {
+    "send": "node --env-file-if-exists=.env src/test-send.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "^5.9.0"
+  }
+}
