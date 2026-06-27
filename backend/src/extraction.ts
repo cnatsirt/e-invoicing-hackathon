@@ -8,30 +8,13 @@
  *  - LLM extracts RAW FACTS only (buyer + line items)
  *  - NO euro amounts, NO totals, NO VAT sums — money.ts handles all that
  *  - vat_rate is a FRACTION (0.21), not a percentage
- *  - Seller profile is injected here but held by the backend
+ *  - Seller is NOT emitted here — it's backend-owned (seller.ts), merged in later
  */
 
 import Groq from "groq-sdk";
-import type { RawInvoice, Buyer, RawLineItem } from "./types.ts";
+import type { ExtractedFacts, RawLineItem } from "./types.ts";
 
 const groq = new Groq(); // reads GROQ_API_KEY from env
-
-// ---------------------------------------------------------------------------
-// Seller profile — update with real details before demo
-// ---------------------------------------------------------------------------
-export const SELLER_PROFILE = {
-  // Sandbox tenant identity — matches the e-invoice.be account (GET /api/me)
-  name: "Test Company BV",
-  vat_number: "BE0999465828",
-  company_id: "0999465828",    // CBE/enterprise number — drives sender Peppol ID
-  address: "Teststraat 1, 1000 Brussel, Belgium",
-  country_code: "BE",
-  email: "tristan@cott.am",
-  iban: "BE68539007547034",
-  bank_name: "BNP Paribas Fortis",
-  peppol_scheme: "0208",       // BE CBE scheme
-  peppol_id: "0999465828",
-};
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -112,7 +95,7 @@ List ALL missing required fields at once.`;
 // ---------------------------------------------------------------------------
 // Extract from text
 // ---------------------------------------------------------------------------
-export async function extractInvoice(userMessage: string, today: string = new Date().toISOString().split("T")[0]): Promise<RawInvoice | { missing_fields: string[]; partial_data: unknown }> {
+export async function extractInvoice(userMessage: string, today: string = new Date().toISOString().split("T")[0]): Promise<ExtractedFacts | { missing_fields: string[]; partial_data: unknown }> {
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages: [
@@ -136,17 +119,14 @@ Extract raw invoice facts and return JSON.`,
   // If missing fields flagged, return as-is for the caller to handle
   if (raw.missing_fields) return raw;
 
-  // Attach seller profile — backend holds this, LLM never sees it
-  return {
-    ...raw,
-    seller: SELLER_PROFILE,
-  } as RawInvoice;
+  // Raw facts only — the backend merges in the seller (see seller.ts).
+  return raw as ExtractedFacts;
 }
 
 // ---------------------------------------------------------------------------
 // Human-readable confirmation (shown to user before sending)
 // ---------------------------------------------------------------------------
-export function formatConfirmation(invoice: RawInvoice): string {
+export function formatConfirmation(invoice: ExtractedFacts): string {
   const lines = invoice.line_items.map((item: RawLineItem) =>
     `  • ${item.description}: ${item.quantity} ${item.unit_code ?? "C62"} × €${item.unit_price.toFixed(2)} (+${(item.vat_rate * 100).toFixed(0)}% VAT)`
   );

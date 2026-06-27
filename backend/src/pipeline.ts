@@ -8,10 +8,11 @@
  * Closes the "glue: accept RawInvoice" TODO — this is what the frontend calls.
  */
 import { writeFileSync, mkdirSync } from "node:fs";
-import { extractInvoice, formatConfirmation, SELLER_PROFILE } from "./extraction.ts";
+import { extractInvoice, formatConfirmation } from "./extraction.ts";
 import { computeInvoice } from "./money.ts";
 import { toDocumentCreate } from "./mapping.ts";
 import { createDocument, sendDocument, getUbl } from "./einvoice.ts";
+import { SELLER } from "./seller.ts";
 import type { RawInvoice } from "./types.ts";
 
 const DRY = process.argv.includes("--dry");
@@ -38,8 +39,9 @@ async function main() {
     return;
   }
 
-  // Seller is backend-owned config (single source of truth: extraction.ts).
-  const raw: RawInvoice = { ...extracted, seller: SELLER_PROFILE };
+  // The seller is backend-owned config (seller.ts), never extracted. Merge it
+  // into the raw facts to form the complete RawInvoice.
+  const raw: RawInvoice = { ...extracted, seller: SELLER };
 
   console.log("\n" + formatConfirmation(raw));
 

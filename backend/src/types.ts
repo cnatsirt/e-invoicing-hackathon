@@ -48,6 +48,10 @@ export interface RawInvoice {
   line_items: RawLineItem[];
 }
 
+// What the extraction layer (LLM) produces — raw facts with NO seller.
+// The seller is backend-owned config (see seller.ts), merged in afterwards.
+export type ExtractedFacts = Omit<RawInvoice, "seller">;
+
 // ---- Computed (deterministic) ----
 
 export interface ComputedLine extends RawLineItem {

@@ -1,4 +1,5 @@
 import type { RawInvoice } from "./types.ts";
+import { SELLER } from "./seller.ts";
 
 // The raw facts an extraction step would produce from:
 //   "Invoice Acme Corp for 3 days consulting at €600/day, 21% VAT"
@@ -8,20 +9,7 @@ export const sampleInvoice: RawInvoice = {
     issue_date: "2026-06-27",
     currency: "EUR",
   },
-  seller: {
-    // The sandbox tenant's own identity (GET /api/me) — required: the sender
-    // Peppol ID must be one the tenant owns.
-    name: "Test Company BV",
-    vat_number: "BE0999465828", // create derives the sender Peppol ID from this (BE + CBE)
-    company_id: "0999465828",
-    address: "Teststraat 1, 1000 Brussel, Belgium",
-    country_code: "BE",
-    email: "tristan@cott.am",
-    iban: "BE68539007547034",
-    bank_name: "BNP Paribas Fortis",
-    peppol_scheme: "0208", // BE CBE/enterprise number
-    peppol_id: "0999465828",
-  },
+  seller: SELLER,
   buyer: {
     name: "Acme Corp",
     vat_number: "BE0987654321",
