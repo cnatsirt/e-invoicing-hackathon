@@ -36,7 +36,7 @@ OUTPUT FORMAT:
   },
   "buyer": {
     "name": "<extract>",
-    "vat_number": "<extract, format: BE + 10 digits e.g. BE0848934496>",
+    "vat_number": "<extract from the input — format BE followed by 10 digits, e.g. BE0XXXXXXXXX; never invent or copy this example>",
     "address": "<extract if mentioned>",
     "country_code": "BE",
     "email": "<extract>",
