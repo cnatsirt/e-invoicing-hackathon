@@ -143,7 +143,7 @@ export function formatConfirmation(invoice: ExtractedFacts): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quick test — run with: node --env-file=../.env src/extraction.ts
+// Quick test — run with: node --env-file=.env src/extraction.ts  (from backend/)
 // ---------------------------------------------------------------------------
 if (process.argv[1]?.endsWith("extraction.ts")) {
   const tests = [

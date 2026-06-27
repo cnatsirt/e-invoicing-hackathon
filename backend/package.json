@@ -7,8 +7,8 @@
   "scripts": {
     "send": "node --env-file-if-exists=.env src/test-send.ts",
     "extract": "npx tsx --env-file=.env src/extraction.ts",
-    "pipeline": "node --env-file-if-exists=../.env --env-file-if-exists=.env src/pipeline.ts",
-    "dev": "node --env-file-if-exists=../.env --env-file-if-exists=.env src/server.ts",
+    "pipeline": "node --env-file-if-exists=.env src/pipeline.ts",
+    "dev": "node --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
