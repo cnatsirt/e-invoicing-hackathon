@@ -6,19 +6,19 @@ Extracts structured invoice data from messy user input and outputs JSON
 that maps directly to the e-invoice.be API format (POST /api/documents/).
 """
 
-import anthropic
 import json
 import os
 import requests
 from datetime import date, timedelta
 from dotenv import load_dotenv
+from groq import Groq
 
 load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config — all secrets from .env
 # ---------------------------------------------------------------------------
-anthropic_client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from .env
+groq_client = Groq()  # reads GROQ_API_KEY from .env
 
 E_INVOICE_API_KEY = os.environ["E_INVOICE_API_KEY"]
 E_INVOICE_BASE_URL = os.getenv("E_INVOICE_BASE_URL", "https://api.e-invoice.be")
@@ -32,8 +32,8 @@ E_INVOICE_HEADERS = {
 # ---------------------------------------------------------------------------
 SELLER_PROFILE = {
     "vendor_name": "Your Company Name",
-    "vendor_tax_id": "BE0123456789",       # full VAT incl. BE prefix
-    "vendor_address": "Your Street 1, 1000 Brussels, Belgium",
+    "vendor_tax_id": "BE1018265814",       # test: e-invoice.be's real VAT (replace with yours)
+    "vendor_address": "Brusselsesteenweg 119A, 1980 Zemst, Belgium",
     "vendor_email": "you@yourcompany.be",
     "payment_details": [
         {
@@ -167,14 +167,11 @@ List all missing fields at once."""
 # ---------------------------------------------------------------------------
 def extract_invoice_from_text(user_message: str) -> dict:
     context = build_context()
-    response = anthropic_client.messages.create(
-        model="claude-opus-4-8",
-        max_tokens=2048,
-        system=SYSTEM_PROMPT,
+    response = groq_client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
         messages=[
-            {
-                "role": "user",
-                "content": f"""<context>
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"""<context>
 {json.dumps(context, indent=2)}
 </context>
 
@@ -182,47 +179,23 @@ def extract_invoice_from_text(user_message: str) -> dict:
 {user_message}
 </user_input>
 
-Extract the invoice and return the complete JSON.""",
-            }
+Extract the invoice and return the complete JSON."""},
         ],
+        response_format={"type": "json_object"},
     )
-    return json.loads(response.content[0].text.strip())
+    return json.loads(response.choices[0].message.content.strip())
 
 
 # ---------------------------------------------------------------------------
 # Extraction — image (receipt / photo of invoice)
 # ---------------------------------------------------------------------------
-def extract_invoice_from_image(image_base64: str, media_type: str = "image/jpeg") -> dict:
-    context = build_context()
-    response = anthropic_client.messages.create(
-        model="claude-opus-4-8",
-        max_tokens=2048,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": image_base64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": f"""<context>
-{json.dumps(context, indent=2)}
-</context>
-
-This is a photo of an invoice or receipt. Extract all visible invoice fields and return the complete JSON.""",
-                    },
-                ],
-            }
-        ],
-    )
-    return json.loads(response.content[0].text.strip())
+def extract_invoice_from_image(image_text: str) -> dict:
+    """
+    For image/PDF input: pass the extracted text content here.
+    Use a separate OCR step (e.g. pytesseract or pdf2image) to get text from the image first,
+    then call this function with the extracted text.
+    """
+    return extract_invoice_from_text(image_text)
 
 
 # ---------------------------------------------------------------------------
@@ -325,8 +298,9 @@ def run_invoice_flow(user_input: str, auto_send: bool = False):
     # 3. Validate against e-invoice.be
     print("\n🔍 Validating with e-invoice.be...")
     validation = validate_invoice(invoice)
-    if not validation.get("valid"):
-        print(f"❌ Validation failed: {validation.get('errors')}")
+    if not validation.get("is_valid"):
+        issues = [i["message"] for i in validation.get("issues", [])]
+        print(f"❌ Validation failed: {issues}")
         return
     print("✅ Valid PEPPOL invoice")
 
@@ -350,11 +324,13 @@ def run_invoice_flow(user_input: str, auto_send: bool = False):
 # Quick tests
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    # Using real Belgian VAT numbers for validation testing
+    # BE0848934496 = OpenPeppol VZW (used in e-invoice.be docs)
+    # BE0471938850 = Collibra NV
     test_inputs = [
-        "Invoice Acme Corp for 3 days consulting at €600/day, 21% VAT. Their VAT is BE0987654321, send to accounts@acme.com",
-        "stuur factuur naar Jan Peeters (BE0111222333, jan@peeters.be) voor 8 uur werk aan €95/uur",
-        "Invoice TechStartup SA, 2 days UX workshop €800/day + 1 day report writing €600, all 21% VAT. VAT BE0555666777 billing@techstartup.io",
-        "Receipt: web hosting renewal €199/year, 21% VAT, client Digital Agency BE0444555666 pay@digitalagency.be",
+        "Invoice Acme Corp for 3 days consulting at €600/day, 21% VAT. Their VAT is BE0848934496, send to accounts@acme.com",
+        "stuur factuur naar Collibra (BE0471938850, billing@collibra.com) voor 8 uur werk aan €95/uur",
+        "Invoice OpenPeppol, 2 days UX workshop €800/day + 1 day report writing €600, all 21% VAT. VAT BE0848934496 billing@openpeppol.org",
     ]
 
     for text in test_inputs:

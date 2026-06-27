@@ -62,7 +62,7 @@ Frontend: Lovable (we have free credits) — chat UI, agent trace, invoice previ
 
 | Service | Who | What For |
 |---|---|---|
-| **Anthropic API** (Claude) | Jimmy | Extract raw facts from messy chat/voice text into a money-free `RawInvoice` |
+| **Groq API** (Llama 4 Scout) | Jimmy | Extract raw facts from messy chat/voice text into a money-free `RawInvoice` |
 | **e-invoice.be API** | Tristan | JSON → validated PEPPOL UBL + send over Peppol; PDF/photo → structured doc (OCR) |
 | **Stripe API** | Tristan | Generate payment links after invoice creation (TODO) |
 | **Lovable** | Both | Frontend chat UI (we have event credits) |
